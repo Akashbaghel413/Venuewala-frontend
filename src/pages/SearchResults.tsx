@@ -1,0 +1,368 @@
+import { useState, useMemo } from 'react';
+import { useSearchParams, Link } from 'react-router-dom';
+import {
+  MapPin, Users, Star, ShieldCheck, SlidersHorizontal,
+  X, ChevronLeft, ChevronRight, UtensilsCrossed, Car,
+} from 'lucide-react';
+import {
+  featuredVenues, Venue, venueCategories, amenityList,
+  Amenity, capacityOptions, sortOptions, SortOption,
+} from '../data/venues';
+import Button from '../components/ui/Button';
+
+const PER_PAGE = 12;
+
+interface Filters {
+  categories: string[];
+  priceMin: number;
+  priceMax: number;
+  minCapacity: number;
+  location: string;
+  date: string;
+  amenities: Amenity[];
+  foodOnly: boolean;
+  sort: SortOption;
+}
+
+const defaultFilters: Filters = {
+  categories: [],
+  priceMin: 5000,
+  priceMax: 500000,
+  minCapacity: 0,
+  location: '',
+  date: '',
+  amenities: [],
+  foodOnly: false,
+  sort: 'rating',
+};
+
+export default function SearchResults() {
+  const [searchParams] = useSearchParams();
+  const urlCity = searchParams.get('city') || '';
+  const urlCategory = searchParams.get('category') || '';
+  const urlEvent = searchParams.get('event') || '';
+
+  const [filters, setFilters] = useState<Filters>(() => ({
+    ...defaultFilters,
+    categories: urlCategory ? [urlCategory] : [],
+    location: urlCity,
+    sort: 'rating',
+  }));
+  const [compareIds, setCompareIds] = useState<string[]>([]);
+  const [page, setPage] = useState(1);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  const filtered = useMemo(() => {
+    let result = featuredVenues.filter((v) => {
+      if (filters.categories.length > 0 && !filters.categories.includes(v.category)) return false;
+      if (v.price < filters.priceMin || v.price > filters.priceMax) return false;
+      if (filters.minCapacity > 0 && v.capacity < filters.minCapacity) return false;
+      if (filters.location && !v.area.toLowerCase().includes(filters.location.toLowerCase()) && !v.city.toLowerCase().includes(filters.location.toLowerCase())) return false;
+      if (filters.foodOnly && !v.foodAvailable) return false;
+      if (filters.amenities.length > 0 && !filters.amenities.every((a) => v.amenities.includes(a))) return false;
+      return true;
+    });
+    if (filters.sort === 'price-asc') result.sort((a, b) => a.price - b.price);
+    else if (filters.sort === 'price-desc') result.sort((a, b) => b.price - a.price);
+    else if (filters.sort === 'rating') result.sort((a, b) => b.rating - a.rating);
+    else if (filters.sort === 'newest') result.sort((a, b) => b.reviews - a.reviews);
+    return result;
+  }, [filters]);
+
+  const totalPages = Math.ceil(filtered.length / PER_PAGE);
+  const paged = filtered.slice((page - 1) * PER_PAGE, page * PER_PAGE);
+
+  const toggleCompare = (id: string) => {
+    setCompareIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : prev.length < 3 ? [...prev, id] : prev));
+  };
+
+  const toggleCategory = (id: string) => {
+    setFilters((f) => ({ ...f, categories: f.categories.includes(id) ? f.categories.filter((c) => c !== id) : [...f.categories, id] }));
+    setPage(1);
+  };
+
+  const toggleAmenity = (a: Amenity) => {
+    setFilters((f) => ({ ...f, amenities: f.amenities.includes(a) ? f.amenities.filter((x) => x !== a) : [...f.amenities, a] }));
+    setPage(1);
+  };
+
+  const clearAll = () => { setFilters({ ...defaultFilters, sort: filters.sort }); setPage(1); };
+  const comparedVenues = compareIds.map((id) => featuredVenues.find((v) => v.id === id)!).filter(Boolean);
+
+  const activeFilterCount = filters.categories.length + (filters.minCapacity > 0 ? 1 : 0) + (filters.foodOnly ? 1 : 0) + filters.amenities.length + (filters.location ? 1 : 0);
+
+  const SidebarContent = () => (
+    <div className="space-y-5">
+      <button onClick={clearAll} className="text-sm text-primary-500 font-medium hover:underline">Clear All Filters</button>
+
+      {/* Venue type */}
+      <div>
+        <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Venue Type</h3>
+        <div className="space-y-2">
+          {venueCategories.map((cat) => (
+            <label key={cat.id} className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer hover:text-gray-900">
+              <input type="checkbox" checked={filters.categories.includes(cat.id)} onChange={() => toggleCategory(cat.id)} className="h-4 w-4 rounded border-gray-300 text-primary-500 focus:ring-primary-400" />
+              {cat.name}
+            </label>
+          ))}
+        </div>
+      </div>
+
+      {/* Price range */}
+      <div>
+        <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Price Range</h3>
+        <div className="flex items-center justify-between text-xs text-gray-600 mb-2">
+          <span>\u20b9{filters.priceMin.toLocaleString('en-IN')}</span>
+          <span>\u20b9{filters.priceMax.toLocaleString('en-IN')}</span>
+        </div>
+        <input type="range" min={5000} max={500000} step={5000} value={filters.priceMax} onChange={(e) => { setFilters((f) => ({ ...f, priceMax: Number(e.target.value) })); setPage(1); }} className="w-full accent-primary-500" />
+      </div>
+
+      {/* Capacity */}
+      <div>
+        <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Min Capacity</h3>
+        <div className="flex flex-wrap gap-2">
+          {capacityOptions.map((c) => (
+            <button key={c} onClick={() => { setFilters((f) => ({ ...f, minCapacity: f.minCapacity === c ? 0 : c })); setPage(1); }} className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${filters.minCapacity === c ? 'bg-primary-500 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
+              {c}+
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Amenities */}
+      <div>
+        <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Amenities</h3>
+        <div className="space-y-2">
+          {amenityList.map((a) => (
+            <label key={a} className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer hover:text-gray-900">
+              <input type="checkbox" checked={filters.amenities.includes(a)} onChange={() => toggleAmenity(a)} className="h-4 w-4 rounded border-gray-300 text-primary-500 focus:ring-primary-400" />
+              {a}
+            </label>
+          ))}
+        </div>
+      </div>
+
+      {/* Food only */}
+      <div>
+        <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer hover:text-gray-900">
+          <input type="checkbox" checked={filters.foodOnly} onChange={() => { setFilters((f) => ({ ...f, foodOnly: !f.foodOnly })); setPage(1); }} className="h-4 w-4 rounded border-gray-300 text-primary-500 focus:ring-primary-400" />
+          In-house Catering Only
+        </label>
+      </div>
+    </div>
+  );
+
+  const displayLocation = filters.location || urlCity || 'Delhi NCR';
+
+  const activeChips: { key: string; label: string; remove: () => void }[] = [];
+  filters.categories.forEach((c) => { const cat = venueCategories.find((x) => x.id === c); if (cat) activeChips.push({ key: `cat-${c}`, label: cat.name, remove: () => toggleCategory(c) }); });
+  if (filters.minCapacity > 0) activeChips.push({ key: 'cap', label: `${filters.minCapacity}+ guests`, remove: () => { setFilters((f) => ({ ...f, minCapacity: 0 })); setPage(1); } });
+  if (filters.foodOnly) activeChips.push({ key: 'food', label: 'Catering Only', remove: () => { setFilters((f) => ({ ...f, foodOnly: false })); setPage(1); } });
+  filters.amenities.forEach((a) => activeChips.push({ key: `am-${a}`, label: a, remove: () => toggleAmenity(a) }));
+  if (filters.location) activeChips.push({ key: 'loc', label: filters.location, remove: () => { setFilters((f) => ({ ...f, location: '' })); setPage(1); } });
+
+  const removeChip = (key: string) => { const chip = activeChips.find((c) => c.key === key); if (chip) chip.remove(); };
+
+  return (
+    <div className="min-h-screen bg-cream pb-8">
+      <div className="container-app py-6">
+        {/* Filter bar */}
+        <div className="flex items-center gap-3 mb-4">
+          <button onClick={() => setSidebarOpen(true)} className="lg:hidden flex items-center gap-2 rounded-[8px] border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 relative">
+            <SlidersHorizontal className="h-4 w-4" />
+            Filters
+            {activeFilterCount > 0 && <span className="absolute -top-1 -right-1 h-4 w-4 rounded-full bg-primary-500 text-[10px] font-bold text-white flex items-center justify-center">{activeFilterCount}</span>}
+          </button>
+
+          {/* Sort dropdown - always visible */}
+          <div className="flex items-center gap-2 ml-auto">
+            <label className="text-xs text-gray-500 hidden sm:block">Sort by:</label>
+            <select value={filters.sort} onChange={(e) => { setFilters((f) => ({ ...f, sort: e.target.value as SortOption })); setPage(1); }} className="rounded-[8px] border border-gray-200 bg-white px-3 py-2 text-sm focus:border-primary-400 focus:outline-none focus:ring-1 focus:ring-primary-400">
+              {sortOptions.map((s) => (<option key={s.value} value={s.value}>{s.label}</option>))}
+            </select>
+          </div>
+        </div>
+
+        <div className="flex gap-6">
+          {/* Desktop sidebar - sticky */}
+          <aside className="hidden lg:block w-64 shrink-0">
+            <div className="sticky top-20 rounded-[12px] border border-gray-100 bg-white p-5 shadow-[0_2px_8px_rgba(0,0,0,0.08)] max-h-[calc(100vh-6rem)] overflow-y-auto">
+              <h2 className="text-base font-semibold text-gray-900 mb-4">Filters</h2>
+              <SidebarContent />
+            </div>
+          </aside>
+
+          {/* Mobile sidebar drawer - bottom drawer style */}
+          {sidebarOpen && (
+            <div className="fixed inset-0 z-50 lg:hidden">
+              <div className="fixed inset-0 bg-black/40" onClick={() => setSidebarOpen(false)} />
+              <div className="fixed bottom-0 left-0 right-0 bg-white rounded-t-[16px] shadow-xl max-h-[80vh] overflow-y-auto p-5">
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="text-base font-semibold">Filters</h2>
+                  <button onClick={() => setSidebarOpen(false)} className="p-1 hover:bg-gray-100 rounded"><X className="h-5 w-5" /></button>
+                </div>
+                <SidebarContent />
+                <Button variant="cta" className="w-full mt-6" onClick={() => setSidebarOpen(false)}>Show {filtered.length} Results</Button>
+              </div>
+            </div>
+          )}
+
+          {/* Results */}
+          <div className="flex-1 min-w-0">
+            {/* Header */}
+            <div className="mb-4">
+              <h1 className="text-xl font-semibold text-gray-900">
+                {filtered.length} venues found in {displayLocation}
+              </h1>
+              {urlEvent && <p className="text-sm text-gray-500 mt-0.5">For {urlEvent} events</p>}
+            </div>
+
+            {/* Active filter chips */}
+            {activeChips.length > 0 && (
+              <div className="flex flex-wrap gap-2 mb-4">
+                {activeChips.map((chip) => (
+                  <span key={chip.key} className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-3 py-1 text-xs font-medium text-gray-700">
+                    {chip.label}
+                    <button onClick={() => removeChip(chip.key)} className="hover:text-gray-900"><X className="h-3 w-3" /></button>
+                  </span>
+                ))}
+                <button onClick={clearAll} className="text-xs text-coral-500 font-medium hover:underline">Clear all</button>
+              </div>
+            )}
+
+            {/* Venue cards */}
+            {paged.length === 0 ? (
+              <div className="rounded-[12px] border border-gray-100 bg-white p-12 text-center shadow-[0_2px_8px_rgba(0,0,0,0.08)]">
+                <div className="h-16 w-16 mx-auto mb-4 rounded-full bg-gray-100 flex items-center justify-center">
+                  <MapPin className="h-8 w-8 text-gray-300" />
+                </div>
+                <h3 className="text-base font-semibold text-gray-900 mb-2">No venues found for your search</h3>
+                <p className="text-sm text-gray-500 mb-4">Try removing some filters or browse all venues.</p>
+                <Button variant="cta" onClick={clearAll}>Browse All Venues</Button>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-6">
+                {paged.map((v) => (<VenueCardGrid key={v.id} venue={v} compareIds={compareIds} toggleCompare={toggleCompare} />))}
+              </div>
+            )}
+
+            {/* Pagination */}
+            {totalPages > 1 && (
+              <div className="flex items-center justify-center gap-2 mt-8">
+                <button onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1} className="p-2 rounded-[8px] border border-gray-200 bg-white text-gray-500 hover:bg-gray-50 disabled:opacity-40">
+                  <ChevronLeft className="h-4 w-4" />
+                </button>
+                {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                  const p = page <= 3 ? i + 1 : page >= totalPages - 2 ? totalPages - 4 + i : page - 2 + i;
+                  if (p < 1 || p > totalPages) return null;
+                  return (
+                    <button key={p} onClick={() => setPage(p)} className={`h-9 w-9 rounded-[8px] text-sm font-medium transition-colors ${page === p ? 'bg-primary-500 text-white' : 'bg-white text-gray-600 hover:bg-gray-50 border border-gray-200'}`}>
+                      {p}
+                    </button>
+                  );
+                })}
+                <button onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page === totalPages} className="p-2 rounded-[8px] border border-gray-200 bg-white text-gray-500 hover:bg-gray-50 disabled:opacity-40">
+                  <ChevronRight className="h-4 w-4" />
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Compare bar - sticky at bottom */}
+      {compareIds.length > 0 && (
+        <div className="fixed bottom-16 md:bottom-0 left-0 right-0 z-40 bg-white border-t border-gray-200 shadow-[0_-4px_12px_rgba(0,0,0,0.1)]">
+          <div className="container-app py-3">
+            <div className="flex items-center gap-4">
+              <div className="flex items-center gap-2 flex-1 overflow-x-auto">
+                {comparedVenues.map((v) => (
+                  <div key={v.id} className="flex items-center gap-2 rounded-full bg-primary-50 px-3 py-1.5 shrink-0">
+                    <img src={v.images[0]} alt={v.name} className="h-8 w-8 rounded-full object-cover" />
+                    <span className="text-sm font-medium text-primary-700 max-w-[120px] truncate">{v.name}</span>
+                    <button onClick={() => toggleCompare(v.id)} className="text-primary-400 hover:text-primary-600"><X className="h-3.5 w-3.5" /></button>
+                  </div>
+                ))}
+                {compareIds.length < 3 && <span className="text-xs text-gray-400 shrink-0">Add {3 - compareIds.length} more</span>}
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <button onClick={() => setCompareIds([])} className="text-sm text-gray-500 hover:text-gray-700">Clear All</button>
+                <Link to={`/compare?ids=${compareIds.join(',')}`} className={compareIds.length >= 2 ? '' : 'pointer-events-none'}>
+                  <Button variant="cta" disabled={compareIds.length < 2} className="text-sm">Compare Now ({compareIds.length})</Button>
+                </Link>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function VenueCardGrid({ venue, compareIds, toggleCompare }: { venue: Venue; compareIds: string[]; toggleCompare: (id: string) => void }) {
+  const isCompared = compareIds.includes(venue.id);
+  const hasParking = venue.amenities.includes('Parking');
+  const hasFood = venue.foodAvailable;
+
+  return (
+    <div className="group rounded-[12px] border border-[#E5E7EB] bg-white overflow-hidden shadow-[0_2px_8px_rgba(0,0,0,0.08)] hover:shadow-[0_8px_16px_rgba(0,0,0,0.12)] hover:-translate-y-[2px] transition-all duration-200">
+      {/* Image - fixed 200px height */}
+      <div className="relative h-[200px] overflow-hidden">
+        <img src={venue.images[0]} alt={venue.name} className="h-full w-full object-cover group-hover:scale-105 transition-transform duration-300" />
+
+        {/* Verified badge */}
+        {venue.verified && (
+          <div className="absolute top-3 left-3">
+            <span className="inline-flex items-center gap-1 rounded-full bg-[#E1F5EE] px-2.5 py-1 text-xs font-medium text-[#0F6E56]">
+              <ShieldCheck className="h-3 w-3" />
+              Verified by Venuewala
+            </span>
+          </div>
+        )}
+
+        {/* Compare checkbox */}
+        <label className="absolute top-3 right-3 flex items-center gap-1 cursor-pointer bg-white/95 backdrop-blur-sm rounded-full px-3 py-1.5 text-xs font-medium text-gray-700 shadow-sm">
+          <input type="checkbox" checked={isCompared} onChange={() => toggleCompare(venue.id)} disabled={!isCompared && compareIds.length >= 3} className="h-3.5 w-3.5 rounded border-gray-300 text-primary-500 focus:ring-primary-400 accent-primary-500" />
+          Compare
+        </label>
+
+        {/* Tags */}
+        <div className="absolute bottom-3 left-3 flex gap-2">
+          {hasFood && <span className="flex items-center gap-1 bg-white/95 rounded-full px-2 py-0.5 text-[10px] font-medium text-gray-700 shadow-sm"><UtensilsCrossed className="h-3 w-3" />Food</span>}
+          {hasParking && <span className="flex items-center gap-1 bg-white/95 rounded-full px-2 py-0.5 text-[10px] font-medium text-gray-700 shadow-sm"><Car className="h-3 w-3" />Parking</span>}
+        </div>
+      </div>
+
+      {/* Content */}
+      <div className="p-4">
+        <h3 className="text-base font-semibold text-gray-900 mb-1 group-hover:text-primary-600 transition-colors">{venue.name}</h3>
+        <div className="flex items-center gap-1 text-sm text-gray-500 mb-3">
+          <MapPin className="h-3.5 w-3.5" />{venue.area}, {venue.city}
+        </div>
+
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-1 text-sm">
+            <Star className="h-4 w-4 fill-amber-400 text-amber-400" />
+            <span className="font-semibold text-gray-900">{venue.rating}</span>
+            <span className="text-gray-400">({venue.reviews})</span>
+          </div>
+          <div className="flex items-center gap-1 text-sm text-gray-500">
+            <Users className="h-3.5 w-3.5" />Up to {venue.capacity}
+          </div>
+        </div>
+
+        <div className="mb-4">
+          <span className="text-xs text-gray-500">From </span>
+          <span className="text-lg font-bold text-gray-900">\u20b9{venue.price.toLocaleString('en-IN')}</span>
+          <span className="text-xs text-gray-500"> / day</span>
+        </div>
+
+        <div className="flex gap-2">
+          <Link to={`/booking?venue=${venue.id}`} className="flex-1"><Button variant="cta" className="w-full text-sm py-2">Book Now</Button></Link>
+          <Link to={`/venue/${venue.id}`} className="flex-1"><Button variant="outline" className="w-full text-sm py-2">Site Visit</Button></Link>
+        </div>
+      </div>
+    </div>
+  );
+}

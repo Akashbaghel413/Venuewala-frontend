@@ -1,0 +1,37 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+    font-size: 14px;
+  }
+  body {
+    @apply font-sans text-gray-900 bg-white antialiased;
+  }
+  h1 {
+    @apply text-[28px] font-semibold;
+  }
+  h2 {
+    @apply text-[22px] font-semibold;
+  }
+  h3 {
+    @apply text-base font-semibold;
+  }
+}
+
+@layer components {
+  .container-app {
+    @apply max-w-7xl mx-auto px-4 sm:px-6 lg:px-8;
+  }
+  .section-padding {
+    @apply py-16;
+  }
+  .card-shadow {
+    @apply shadow-[0_2px_8px_rgba(0,0,0,0.08)];
+  }
+  .card-shadow-hover {
+    @apply hover:shadow-[0_8px_16px_rgba(0,0,0,0.12)];
+  }
+}
