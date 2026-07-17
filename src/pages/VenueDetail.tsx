@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import {
   MapPin, Star, Users, ShieldCheck, Heart, Share2,
@@ -7,7 +7,8 @@ import {
   Sparkles, Copy, Home, Search, ClipboardList,
   ArrowUpDown, Wine,
 } from 'lucide-react';
-import { featuredVenues, venueReviews, Review, Amenity } from '../data/venues';
+import { Venue, Review, Amenity } from '../data/venues';
+import { api, ApiError } from '../lib/api';
 import Badge from '../components/ui/Badge';
 import Button from '../components/ui/Button';
 import Modal from '../components/ui/Modal';
@@ -32,8 +33,11 @@ type FoodOption = 'venueOnly' | 'withCatering';
 
 export default function VenueDetail() {
   const { id } = useParams();
-  const venue = featuredVenues.find((v) => v.id === id) || featuredVenues[0];
-  const reviews = venueReviews.filter((r) => r.venueId === venue.id);
+
+  const [venue, setVenue] = useState<Venue | null>(null);
+  const [reviews, setReviews] = useState<Review[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
 
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [lightboxIndex, setLightboxIndex] = useState(0);
@@ -49,7 +53,37 @@ export default function VenueDetail() {
 
   const today = new Date().toISOString().split('T')[0];
 
+  useEffect(() => {
+    if (!id) return;
+    let cancelled = false;
+    setLoading(true);
+    setLoadError('');
+    api
+      .getVenue(id)
+      .then(({ venue, reviews }) => {
+        if (cancelled) return;
+        setVenue(venue);
+        setReviews(reviews);
+        setGuestCount(Math.min(100, venue.capacity));
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setLoadError(
+          err instanceof ApiError && err.status === 404
+            ? 'This venue could not be found.'
+            : 'Could not load this venue right now. The server might be waking up - try refreshing.'
+        );
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [id]);
+
   const pricing = useMemo(() => {
+    if (!venue) return null;
     const slotPricing = venue.pricing[selectedSlot];
     const venueFee = foodOption === 'withCatering' ? slotPricing.withCatering : slotPricing.venueOnly;
     const cateringPerGuest = foodOption === 'withCatering' ? 800 : 0;
@@ -68,8 +102,6 @@ export default function VenueDetail() {
     fullDay: 'Full Day (8 AM – 11 PM)',
   };
 
-  const starBreakdownTotal = Object.values(venue.starBreakdown).reduce((a, b) => a + b, 0);
-
   const openLightbox = (index: number) => {
     setLightboxIndex(index);
     setLightboxOpen(true);
@@ -86,9 +118,34 @@ export default function VenueDetail() {
     'Sound System', 'CCTV', 'Bridal Room', 'Vastu Compliant', 'Lift', 'Bar Area',
   ];
 
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-white flex items-center justify-center">
+        <div className="text-center">
+          <div className="h-10 w-10 mx-auto mb-3 rounded-full border-2 border-primary-200 border-t-primary-500 animate-spin" />
+          <p className="text-sm text-gray-400">Loading venue...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (loadError || !venue || !pricing) {
+    return (
+      <div className="min-h-screen bg-white flex items-center justify-center px-4">
+        <div className="text-center max-w-sm">
+          <p className="text-sm text-coral-500 mb-4">{loadError || 'This venue could not be found.'}</p>
+          <Link to="/search">
+            <Button variant="cta">Back to Search</Button>
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  const starBreakdownTotal = Object.values(venue.starBreakdown).reduce((a, b) => a + b, 0);
+
   return (
     <div className="min-h-screen bg-white">
-      {/* Breadcrumb */}
       <div className="border-b border-gray-100 bg-gray-50">
         <div className="container-app py-3">
           <nav className="flex items-center gap-2 text-sm text-gray-500">
@@ -105,10 +162,8 @@ export default function VenueDetail() {
         </div>
       </div>
 
-      {/* Photo Gallery — Desktop */}
       <div className="container-app pt-5">
         <div className="hidden md:grid grid-cols-5 gap-2 rounded-card overflow-hidden h-[400px]">
-          {/* Main image — 60% */}
           <div
             className="col-span-3 cursor-pointer relative group overflow-hidden"
             onClick={() => openLightbox(0)}
@@ -116,7 +171,6 @@ export default function VenueDetail() {
             <img src={venue.images[0]} alt={venue.name} className="h-full w-full object-cover group-hover:scale-105 transition-transform duration-300" />
             <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors" />
           </div>
-          {/* 2×2 thumbnails — 40% */}
           <div className="col-span-2 grid grid-cols-2 grid-rows-2 gap-2">
             {[1, 2, 3, 4].map((i) => {
               const imgSrc = venue.images[i] || venue.images[0];
@@ -142,14 +196,12 @@ export default function VenueDetail() {
           </div>
         </div>
 
-        {/* Photo Gallery — Mobile: single hero with dots */}
         <div className="md:hidden relative h-64 rounded-card overflow-hidden">
           <img
             src={venue.images[mobileImageIndex]}
             alt={venue.name}
             className="h-full w-full object-cover"
           />
-          {/* Dots */}
           <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex gap-1.5">
             {venue.images.map((_, i) => (
               <button
@@ -159,7 +211,6 @@ export default function VenueDetail() {
               />
             ))}
           </div>
-          {/* Nav arrows */}
           <button
             onClick={() => setMobileImageIndex((p) => (p > 0 ? p - 1 : venue.images.length - 1))}
             className="absolute left-2 top-1/2 -translate-y-1/2 bg-black/30 backdrop-blur-sm p-1.5 rounded-full text-white"
@@ -181,7 +232,6 @@ export default function VenueDetail() {
         </div>
       </div>
 
-      {/* Lightbox */}
       <Modal open={lightboxOpen} onClose={() => setLightboxOpen(false)}>
         <div className="relative select-none">
           <img
@@ -216,12 +266,9 @@ export default function VenueDetail() {
         </div>
       </Modal>
 
-      {/* Content area */}
       <div className="container-app py-6">
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          {/* Main content */}
           <div className="lg:col-span-2">
-            {/* Header */}
             <div className="mb-5">
               <div className="flex items-start justify-between gap-4 mb-3">
                 <div className="flex-1 min-w-0">
@@ -235,7 +282,6 @@ export default function VenueDetail() {
                     <MapPin className="h-4 w-4 shrink-0 text-primary-500" />
                     <span className="text-sm">{venue.address}</span>
                   </div>
-                  {/* Rating */}
                   <div className="flex items-center gap-2">
                     <div className="flex items-center gap-0.5">
                       {Array.from({ length: 5 }).map((_, i) => (
@@ -251,7 +297,6 @@ export default function VenueDetail() {
                     </button>
                   </div>
                 </div>
-                {/* Action row */}
                 <div className="flex items-center gap-2 shrink-0">
                   <button
                     onClick={() => setSaved(!saved)}
@@ -277,7 +322,6 @@ export default function VenueDetail() {
               </div>
             </div>
 
-            {/* Quick info pills */}
             <div className="flex flex-wrap gap-2 mb-6">
               {[
                 { icon: Users, text: `Up to ${venue.capacity} guests` },
@@ -295,7 +339,6 @@ export default function VenueDetail() {
               ))}
             </div>
 
-            {/* Tabs */}
             <div className="border-b border-gray-200 mb-6 flex gap-0 overflow-x-auto">
               {(['overview', 'amenities', 'pricing', 'reviews', 'location'] as const).map((tab) => (
                 <button
@@ -312,7 +355,6 @@ export default function VenueDetail() {
               ))}
             </div>
 
-            {/* ── OVERVIEW TAB ── */}
             {activeTab === 'overview' && (
               <div className="space-y-6">
                 <div>
@@ -361,7 +403,6 @@ export default function VenueDetail() {
               </div>
             )}
 
-            {/* ── AMENITIES TAB ── */}
             {activeTab === 'amenities' && (
               <div>
                 <h2 className="text-lg font-semibold text-gray-900 mb-4">Amenities & Facilities</h2>
@@ -393,7 +434,6 @@ export default function VenueDetail() {
               </div>
             )}
 
-            {/* ── PRICING TAB ── */}
             {activeTab === 'pricing' && (
               <div>
                 <h2 className="text-lg font-semibold text-gray-900 mb-4">Pricing</h2>
@@ -434,13 +474,11 @@ export default function VenueDetail() {
               </div>
             )}
 
-            {/* ── REVIEWS TAB ── */}
             {activeTab === 'reviews' && (
               <div>
                 <h2 className="text-lg font-semibold text-gray-900 mb-5">Guest Reviews</h2>
                 <div className="rounded-card border border-gray-100 p-5 mb-6">
                   <div className="flex flex-col sm:flex-row gap-6 items-start">
-                    {/* Overall score */}
                     <div className="text-center shrink-0">
                       <div className="text-5xl font-bold text-gray-900">{venue.rating}</div>
                       <div className="flex items-center gap-0.5 justify-center mt-1.5">
@@ -451,7 +489,6 @@ export default function VenueDetail() {
                       <p className="text-xs text-gray-500 mt-1">{venue.reviews} reviews</p>
                     </div>
 
-                    {/* Star breakdown */}
                     <div className="flex-1 w-full space-y-2">
                       {([5, 4, 3, 2, 1] as const).map((star) => {
                         const count = venue.starBreakdown[star];
@@ -474,7 +511,6 @@ export default function VenueDetail() {
                   </div>
                 </div>
 
-                {/* Review cards */}
                 <div className="space-y-4 mb-6">
                   {reviews.length > 0 ? reviews.map((r: Review) => (
                     <div key={r.id} className="rounded-card border border-gray-100 p-4 hover:shadow-md transition-shadow">
@@ -506,11 +542,9 @@ export default function VenueDetail() {
               </div>
             )}
 
-            {/* ── LOCATION TAB ── */}
             {activeTab === 'location' && (
               <div>
                 <h2 className="text-lg font-semibold text-gray-900 mb-4">Location</h2>
-                {/* Map placeholder */}
                 <div className="rounded-card border border-gray-200 overflow-hidden mb-4">
                   <iframe
                     title="Venue Location"
@@ -520,7 +554,6 @@ export default function VenueDetail() {
                   />
                 </div>
 
-                {/* Address with copy */}
                 <div className="rounded-card border border-gray-100 p-4 mb-4">
                   <h3 className="text-sm font-semibold text-gray-900 mb-2">Full Address</h3>
                   <div className="flex items-start justify-between gap-3">
@@ -538,7 +571,6 @@ export default function VenueDetail() {
                   </div>
                 </div>
 
-                {/* Landmarks */}
                 <div className="rounded-card border border-gray-100 p-4">
                   <h3 className="text-sm font-semibold text-gray-900 mb-3">Nearby Landmarks</h3>
                   <ul className="space-y-2.5">
@@ -556,10 +588,8 @@ export default function VenueDetail() {
             )}
           </div>
 
-          {/* ── STICKY BOOKING PANEL ── */}
           <div className="lg:col-span-1">
             <div className="sticky top-20 rounded-card border border-gray-200 bg-white shadow-md overflow-hidden">
-              {/* Header */}
               <div className="bg-primary-500 px-5 py-4">
                 <p className="text-primary-100 text-xs font-medium mb-0.5">Starting from</p>
                 <div className="flex items-end gap-1">
@@ -569,7 +599,6 @@ export default function VenueDetail() {
               </div>
 
               <div className="p-5 space-y-4">
-                {/* Date picker */}
                 <div>
                   <label className="block text-xs font-semibold text-gray-700 mb-1.5">Select Date</label>
                   <input
@@ -581,7 +610,6 @@ export default function VenueDetail() {
                   />
                 </div>
 
-                {/* Slot selector */}
                 <div>
                   <label className="block text-xs font-semibold text-gray-700 mb-1.5">Time Slot</label>
                   <div className="grid grid-cols-3 gap-1.5">
@@ -602,7 +630,6 @@ export default function VenueDetail() {
                   <p className="text-[10px] text-gray-400 mt-1">{slotLabel[selectedSlot]}</p>
                 </div>
 
-                {/* Food option */}
                 <div>
                   <label className="block text-xs font-semibold text-gray-700 mb-1.5">Food Option</label>
                   <div className="flex rounded-input border border-gray-200 overflow-hidden text-xs">
@@ -621,7 +648,6 @@ export default function VenueDetail() {
                   </div>
                 </div>
 
-                {/* Guest count */}
                 <div>
                   <label className="block text-xs font-semibold text-gray-700 mb-1.5">
                     Expected Guests <span className="font-normal text-gray-400">(max {venue.capacity})</span>
@@ -643,7 +669,6 @@ export default function VenueDetail() {
                   </div>
                 </div>
 
-                {/* Price breakdown */}
                 <div className="border-t border-gray-100 pt-4 space-y-2">
                   <div className="flex justify-between text-sm">
                     <span className="text-gray-500">Base price</span>
@@ -677,7 +702,6 @@ export default function VenueDetail() {
                   </div>
                 </div>
 
-                {/* CTAs */}
                 <Link to={`/booking?venue=${venue.id}`}>
                   <Button variant="cta" className="w-full py-3 text-sm">Book Now</Button>
                 </Link>
@@ -685,7 +709,6 @@ export default function VenueDetail() {
                   <MapPin className="h-4 w-4" />Schedule a Site Visit
                 </Button>
 
-                {/* Cancellation note */}
                 <p className="text-[11px] text-gray-400 leading-relaxed text-center border-t border-gray-100 pt-3">
                   Free cancellation within 7 days of booking or 3 months before event date, whichever is earlier.
                 </p>

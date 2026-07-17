@@ -1,13 +1,14 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
 import {
   MapPin, Users, Star, ShieldCheck, SlidersHorizontal,
   X, ChevronLeft, ChevronRight, UtensilsCrossed, Car,
 } from 'lucide-react';
 import {
-  featuredVenues, Venue, venueCategories, amenityList,
+  Venue, venueCategories, amenityList,
   Amenity, capacityOptions, sortOptions, SortOption,
 } from '../data/venues';
+import { api, ApiError } from '../lib/api';
 import Button from '../components/ui/Button';
 
 const PER_PAGE = 12;
@@ -52,8 +53,37 @@ export default function SearchResults() {
   const [page, setPage] = useState(1);
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
+  const [allVenues, setAllVenues] = useState<Venue[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    api
+      .listVenues()
+      .then(({ venues }) => {
+        if (!cancelled) setAllVenues(venues);
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setLoadError(
+            err instanceof ApiError
+              ? err.message
+              : 'Could not load venues. The server might be waking up - try refreshing in a moment.'
+          );
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const filtered = useMemo(() => {
-    let result = featuredVenues.filter((v) => {
+    let result = allVenues.filter((v) => {
       if (filters.categories.length > 0 && !filters.categories.includes(v.category)) return false;
       if (v.price < filters.priceMin || v.price > filters.priceMax) return false;
       if (filters.minCapacity > 0 && v.capacity < filters.minCapacity) return false;
@@ -67,7 +97,7 @@ export default function SearchResults() {
     else if (filters.sort === 'rating') result.sort((a, b) => b.rating - a.rating);
     else if (filters.sort === 'newest') result.sort((a, b) => b.reviews - a.reviews);
     return result;
-  }, [filters]);
+  }, [filters, allVenues]);
 
   const totalPages = Math.ceil(filtered.length / PER_PAGE);
   const paged = filtered.slice((page - 1) * PER_PAGE, page * PER_PAGE);
@@ -87,7 +117,7 @@ export default function SearchResults() {
   };
 
   const clearAll = () => { setFilters({ ...defaultFilters, sort: filters.sort }); setPage(1); };
-  const comparedVenues = compareIds.map((id) => featuredVenues.find((v) => v.id === id)!).filter(Boolean);
+  const comparedVenues = compareIds.map((id) => allVenues.find((v) => v.id === id)!).filter(Boolean);
 
   const activeFilterCount = filters.categories.length + (filters.minCapacity > 0 ? 1 : 0) + (filters.foodOnly ? 1 : 0) + filters.amenities.length + (filters.location ? 1 : 0);
 
@@ -95,7 +125,6 @@ export default function SearchResults() {
     <div className="space-y-5">
       <button onClick={clearAll} className="text-sm text-primary-500 font-medium hover:underline">Clear All Filters</button>
 
-      {/* Venue type */}
       <div>
         <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Venue Type</h3>
         <div className="space-y-2">
@@ -108,17 +137,15 @@ export default function SearchResults() {
         </div>
       </div>
 
-      {/* Price range */}
       <div>
         <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Price Range</h3>
         <div className="flex items-center justify-between text-xs text-gray-600 mb-2">
-          <span>\u20b9{filters.priceMin.toLocaleString('en-IN')}</span>
-          <span>\u20b9{filters.priceMax.toLocaleString('en-IN')}</span>
+          <span>₹{filters.priceMin.toLocaleString('en-IN')}</span>
+          <span>₹{filters.priceMax.toLocaleString('en-IN')}</span>
         </div>
         <input type="range" min={5000} max={500000} step={5000} value={filters.priceMax} onChange={(e) => { setFilters((f) => ({ ...f, priceMax: Number(e.target.value) })); setPage(1); }} className="w-full accent-primary-500" />
       </div>
 
-      {/* Capacity */}
       <div>
         <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Min Capacity</h3>
         <div className="flex flex-wrap gap-2">
@@ -130,7 +157,6 @@ export default function SearchResults() {
         </div>
       </div>
 
-      {/* Amenities */}
       <div>
         <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Amenities</h3>
         <div className="space-y-2">
@@ -143,7 +169,6 @@ export default function SearchResults() {
         </div>
       </div>
 
-      {/* Food only */}
       <div>
         <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer hover:text-gray-900">
           <input type="checkbox" checked={filters.foodOnly} onChange={() => { setFilters((f) => ({ ...f, foodOnly: !f.foodOnly })); setPage(1); }} className="h-4 w-4 rounded border-gray-300 text-primary-500 focus:ring-primary-400" />
@@ -167,7 +192,6 @@ export default function SearchResults() {
   return (
     <div className="min-h-screen bg-cream pb-8">
       <div className="container-app py-6">
-        {/* Filter bar */}
         <div className="flex items-center gap-3 mb-4">
           <button onClick={() => setSidebarOpen(true)} className="lg:hidden flex items-center gap-2 rounded-[8px] border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 relative">
             <SlidersHorizontal className="h-4 w-4" />
@@ -175,7 +199,6 @@ export default function SearchResults() {
             {activeFilterCount > 0 && <span className="absolute -top-1 -right-1 h-4 w-4 rounded-full bg-primary-500 text-[10px] font-bold text-white flex items-center justify-center">{activeFilterCount}</span>}
           </button>
 
-          {/* Sort dropdown - always visible */}
           <div className="flex items-center gap-2 ml-auto">
             <label className="text-xs text-gray-500 hidden sm:block">Sort by:</label>
             <select value={filters.sort} onChange={(e) => { setFilters((f) => ({ ...f, sort: e.target.value as SortOption })); setPage(1); }} className="rounded-[8px] border border-gray-200 bg-white px-3 py-2 text-sm focus:border-primary-400 focus:outline-none focus:ring-1 focus:ring-primary-400">
@@ -185,7 +208,6 @@ export default function SearchResults() {
         </div>
 
         <div className="flex gap-6">
-          {/* Desktop sidebar - sticky */}
           <aside className="hidden lg:block w-64 shrink-0">
             <div className="sticky top-20 rounded-[12px] border border-gray-100 bg-white p-5 shadow-[0_2px_8px_rgba(0,0,0,0.08)] max-h-[calc(100vh-6rem)] overflow-y-auto">
               <h2 className="text-base font-semibold text-gray-900 mb-4">Filters</h2>
@@ -193,7 +215,6 @@ export default function SearchResults() {
             </div>
           </aside>
 
-          {/* Mobile sidebar drawer - bottom drawer style */}
           {sidebarOpen && (
             <div className="fixed inset-0 z-50 lg:hidden">
               <div className="fixed inset-0 bg-black/40" onClick={() => setSidebarOpen(false)} />
@@ -208,9 +229,7 @@ export default function SearchResults() {
             </div>
           )}
 
-          {/* Results */}
           <div className="flex-1 min-w-0">
-            {/* Header */}
             <div className="mb-4">
               <h1 className="text-xl font-semibold text-gray-900">
                 {filtered.length} venues found in {displayLocation}
@@ -218,7 +237,6 @@ export default function SearchResults() {
               {urlEvent && <p className="text-sm text-gray-500 mt-0.5">For {urlEvent} events</p>}
             </div>
 
-            {/* Active filter chips */}
             {activeChips.length > 0 && (
               <div className="flex flex-wrap gap-2 mb-4">
                 {activeChips.map((chip) => (
@@ -231,8 +249,23 @@ export default function SearchResults() {
               </div>
             )}
 
-            {/* Venue cards */}
-            {paged.length === 0 ? (
+            {loading ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-6">
+                {Array.from({ length: 6 }).map((_, i) => (
+                  <div key={i} className="rounded-[12px] border border-[#E5E7EB] bg-white overflow-hidden animate-pulse">
+                    <div className="h-[200px] bg-gray-100" />
+                    <div className="p-4 space-y-2">
+                      <div className="h-4 bg-gray-100 rounded w-3/4" />
+                      <div className="h-3 bg-gray-100 rounded w-1/2" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : loadError ? (
+              <div className="rounded-[12px] border border-gray-100 bg-white p-12 text-center shadow-[0_2px_8px_rgba(0,0,0,0.08)]">
+                <p className="text-sm text-coral-500">{loadError}</p>
+              </div>
+            ) : paged.length === 0 ? (
               <div className="rounded-[12px] border border-gray-100 bg-white p-12 text-center shadow-[0_2px_8px_rgba(0,0,0,0.08)]">
                 <div className="h-16 w-16 mx-auto mb-4 rounded-full bg-gray-100 flex items-center justify-center">
                   <MapPin className="h-8 w-8 text-gray-300" />
@@ -247,7 +280,6 @@ export default function SearchResults() {
               </div>
             )}
 
-            {/* Pagination */}
             {totalPages > 1 && (
               <div className="flex items-center justify-center gap-2 mt-8">
                 <button onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1} className="p-2 rounded-[8px] border border-gray-200 bg-white text-gray-500 hover:bg-gray-50 disabled:opacity-40">
@@ -271,7 +303,6 @@ export default function SearchResults() {
         </div>
       </div>
 
-      {/* Compare bar - sticky at bottom */}
       {compareIds.length > 0 && (
         <div className="fixed bottom-16 md:bottom-0 left-0 right-0 z-40 bg-white border-t border-gray-200 shadow-[0_-4px_12px_rgba(0,0,0,0.1)]">
           <div className="container-app py-3">
@@ -300,69 +331,4 @@ export default function SearchResults() {
   );
 }
 
-function VenueCardGrid({ venue, compareIds, toggleCompare }: { venue: Venue; compareIds: string[]; toggleCompare: (id: string) => void }) {
-  const isCompared = compareIds.includes(venue.id);
-  const hasParking = venue.amenities.includes('Parking');
-  const hasFood = venue.foodAvailable;
-
-  return (
-    <div className="group rounded-[12px] border border-[#E5E7EB] bg-white overflow-hidden shadow-[0_2px_8px_rgba(0,0,0,0.08)] hover:shadow-[0_8px_16px_rgba(0,0,0,0.12)] hover:-translate-y-[2px] transition-all duration-200">
-      {/* Image - fixed 200px height */}
-      <div className="relative h-[200px] overflow-hidden">
-        <img src={venue.images[0]} alt={venue.name} className="h-full w-full object-cover group-hover:scale-105 transition-transform duration-300" />
-
-        {/* Verified badge */}
-        {venue.verified && (
-          <div className="absolute top-3 left-3">
-            <span className="inline-flex items-center gap-1 rounded-full bg-[#E1F5EE] px-2.5 py-1 text-xs font-medium text-[#0F6E56]">
-              <ShieldCheck className="h-3 w-3" />
-              Verified by Venuewala
-            </span>
-          </div>
-        )}
-
-        {/* Compare checkbox */}
-        <label className="absolute top-3 right-3 flex items-center gap-1 cursor-pointer bg-white/95 backdrop-blur-sm rounded-full px-3 py-1.5 text-xs font-medium text-gray-700 shadow-sm">
-          <input type="checkbox" checked={isCompared} onChange={() => toggleCompare(venue.id)} disabled={!isCompared && compareIds.length >= 3} className="h-3.5 w-3.5 rounded border-gray-300 text-primary-500 focus:ring-primary-400 accent-primary-500" />
-          Compare
-        </label>
-
-        {/* Tags */}
-        <div className="absolute bottom-3 left-3 flex gap-2">
-          {hasFood && <span className="flex items-center gap-1 bg-white/95 rounded-full px-2 py-0.5 text-[10px] font-medium text-gray-700 shadow-sm"><UtensilsCrossed className="h-3 w-3" />Food</span>}
-          {hasParking && <span className="flex items-center gap-1 bg-white/95 rounded-full px-2 py-0.5 text-[10px] font-medium text-gray-700 shadow-sm"><Car className="h-3 w-3" />Parking</span>}
-        </div>
-      </div>
-
-      {/* Content */}
-      <div className="p-4">
-        <h3 className="text-base font-semibold text-gray-900 mb-1 group-hover:text-primary-600 transition-colors">{venue.name}</h3>
-        <div className="flex items-center gap-1 text-sm text-gray-500 mb-3">
-          <MapPin className="h-3.5 w-3.5" />{venue.area}, {venue.city}
-        </div>
-
-        <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center gap-1 text-sm">
-            <Star className="h-4 w-4 fill-amber-400 text-amber-400" />
-            <span className="font-semibold text-gray-900">{venue.rating}</span>
-            <span className="text-gray-400">({venue.reviews})</span>
-          </div>
-          <div className="flex items-center gap-1 text-sm text-gray-500">
-            <Users className="h-3.5 w-3.5" />Up to {venue.capacity}
-          </div>
-        </div>
-
-        <div className="mb-4">
-          <span className="text-xs text-gray-500">From </span>
-          <span className="text-lg font-bold text-gray-900">\u20b9{venue.price.toLocaleString('en-IN')}</span>
-          <span className="text-xs text-gray-500"> / day</span>
-        </div>
-
-        <div className="flex gap-2">
-          <Link to={`/booking?venue=${venue.id}`} className="flex-1"><Button variant="cta" className="w-full text-sm py-2">Book Now</Button></Link>
-          <Link to={`/venue/${venue.id}`} className="flex-1"><Button variant="outline" className="w-full text-sm py-2">Site Visit</Button></Link>
-        </div>
-      </div>
-    </div>
-  );
-}
+function VenueCardGrid({ venue, compareIds,

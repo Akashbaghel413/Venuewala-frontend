@@ -1,12 +1,13 @@
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Star, MapPin, Users, ShieldCheck } from 'lucide-react';
-import { featuredVenues, Venue } from '../../data/venues';
+import { Venue } from '../../data/venues';
+import { api, ApiError } from '../../lib/api';
 import Button from '../ui/Button';
 
 function VenueCard({ venue }: { venue: Venue }) {
   return (
     <div className="group rounded-[12px] border border-[#E5E7EB] bg-white overflow-hidden shadow-[0_2px_8px_rgba(0,0,0,0.08)] hover:shadow-[0_8px_16px_rgba(0,0,0,0.12)] hover:-translate-y-[2px] transition-all duration-200">
-      {/* Image - fixed 200px height */}
       <div className="relative h-[200px] overflow-hidden">
         <img
           src={venue.images[0]}
@@ -23,7 +24,6 @@ function VenueCard({ venue }: { venue: Venue }) {
         )}
       </div>
 
-      {/* Content - 16px padding */}
       <div className="p-4">
         <h3 className="text-base font-semibold text-gray-900 mb-1 group-hover:text-primary-600 transition-colors">
           {venue.name}
@@ -72,6 +72,34 @@ function VenueCard({ venue }: { venue: Venue }) {
 }
 
 export default function FeaturedSection() {
+  const [venues, setVenues] = useState<Venue[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .listVenues()
+      .then(({ venues }) => {
+        if (!cancelled) setVenues(venues.slice(0, 6));
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setError(
+            err instanceof ApiError
+              ? err.message
+              : 'Could not load venues. The server might be waking up - try refreshing in a moment.'
+          );
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   return (
     <section className="py-16 bg-cream">
       <div className="container-app">
@@ -88,11 +116,31 @@ export default function FeaturedSection() {
         </div>
         <p className="text-sm text-gray-500 mb-6">Most booked venues with excellent ratings</p>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-          {featuredVenues.slice(0, 6).map((venue) => (
-            <VenueCard key={venue.id} venue={venue} />
-          ))}
-        </div>
+        {loading && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <div key={i} className="rounded-[12px] border border-[#E5E7EB] bg-white overflow-hidden animate-pulse">
+                <div className="h-[200px] bg-gray-100" />
+                <div className="p-4 space-y-2">
+                  <div className="h-4 bg-gray-100 rounded w-3/4" />
+                  <div className="h-3 bg-gray-100 rounded w-1/2" />
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {!loading && error && (
+          <p className="text-sm text-coral-500 text-center py-8">{error}</p>
+        )}
+
+        {!loading && !error && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+            {venues.map((venue) => (
+              <VenueCard key={venue.id} venue={venue} />
+            ))}
+          </div>
+        )}
       </div>
     </section>
   );
