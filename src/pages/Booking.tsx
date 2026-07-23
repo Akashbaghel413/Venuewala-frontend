@@ -1,11 +1,12 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import {
   Calendar, CheckCircle, ChevronDown, ChevronUp,
   MapPin, Users, Star, ShieldCheck, Download, ArrowRight, Phone,
   Home, Loader2, Lock, Check,
 } from 'lucide-react';
-import { featuredVenues, eventTypes } from '../data/venues';
+import { Venue, eventTypes } from '../data/venues';
+import { api, ApiError } from '../lib/api';
 import Button from '../components/ui/Button';
 import Badge from '../components/ui/Badge';
 
@@ -14,9 +15,9 @@ type FoodPref = 'veg' | 'veg-nonveg' | 'no-catering';
 type PaymentMethod = 'upi' | 'netbanking' | 'card' | 'emi';
 
 const slotLabels: Record<Slot, string> = {
-  morning: 'Morning (8 AM \u2013 2 PM)',
-  evening: 'Evening (4 PM \u2013 11 PM)',
-  fullDay: 'Full Day (8 AM \u2013 11 PM)',
+  morning: 'Morning (8 AM – 2 PM)',
+  evening: 'Evening (4 PM – 11 PM)',
+  fullDay: 'Full Day (8 AM – 11 PM)',
 };
 
 const foodLabels: Record<FoodPref, string> = {
@@ -28,7 +29,7 @@ const foodLabels: Record<FoodPref, string> = {
 const cancellationPolicy = [
   'Free cancellation within 7 days of booking date or 3 months before the event date, whichever is earlier.',
   'After the free cancellation window, 50% of the advance payment will be forfeited.',
-  'No cancellations within 30 days of the event date \u2014 the full advance is non-refundable.',
+  'No cancellations within 30 days of the event date — the full advance is non-refundable.',
   'Date changes are subject to availability and must be requested at least 15 days before the original booking date.',
   'Venuewala reserves the right to cancel a booking if the venue becomes unavailable due to unforeseen circumstances, in which case a full refund will be issued.',
 ];
@@ -45,16 +46,44 @@ const banks = [
 ];
 
 const emiOptions = [
-  { months: 3, interest: 0, label: '3 months \u2014 No Cost EMI' },
-  { months: 6, interest: 0, label: '6 months \u2014 No Cost EMI' },
-  { months: 12, interest: 1.5, label: '12 months \u2014 1.5% interest/month' },
+  { months: 3, interest: 0, label: '3 months — No Cost EMI' },
+  { months: 6, interest: 0, label: '6 months — No Cost EMI' },
+  { months: 12, interest: 1.5, label: '12 months — 1.5% interest/month' },
 ];
 
 export default function Booking() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const venueId = searchParams.get('venue') || '1';
-  const venue = featuredVenues.find((v) => v.id === venueId) || featuredVenues[0];
+
+  const [venue, setVenue] = useState<Venue | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    api
+      .getVenue(venueId)
+      .then(({ venue }) => {
+        if (!cancelled) setVenue(venue);
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setLoadError(
+            err instanceof ApiError && err.status === 404
+              ? 'This venue could not be found.'
+              : 'Could not load this venue right now. The server might be waking up - try refreshing.'
+          );
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [venueId]);
 
   const [step, setStep] = useState(1);
   const today = new Date().toISOString().split('T')[0];
@@ -87,9 +116,10 @@ export default function Booking() {
   const [paying, setPaying] = useState(false);
   const [bookingDone, setBookingDone] = useState(false);
 
-  const bookingId = useMemo(() => 'VW-2024-' + Math.random().toString(36).slice(2, 7).toUpperCase(), []);
+  const [savedBookingId, setSavedBookingId] = useState('');
 
   const pricing = useMemo(() => {
+    if (!venue) return null;
     const slotPrice = venue.pricing[slot];
     const hasCatering = foodPref !== 'no-catering';
     const basePrice = hasCatering ? slotPrice.withCatering : slotPrice.venueOnly;
@@ -103,6 +133,7 @@ export default function Booking() {
   }, [venue, slot, foodPref, guests]);
 
   const validateStep1 = () => {
+    if (!venue) return false;
     const newErrors: Record<string, string> = {};
     if (!date) newErrors.date = 'Please select an event date';
     if (!guests || guests < 10) newErrors.guests = 'Minimum 10 guests required';
@@ -119,12 +150,47 @@ export default function Booking() {
     if (validateStep1()) setStep(2);
   };
 
+  const [bookingError, setBookingError] = useState('');
+
   const handlePayment = () => {
+    if (!venue || !pricing) return;
     setPaying(true);
-    setTimeout(() => {
-      setPaying(false);
-      setBookingDone(true);
-    }, 2000);
+    setBookingError('');
+    api
+      .createBooking({
+        venueId: venue.id,
+        eventDate: date,
+        slot,
+        guests,
+        eventType,
+        foodPref,
+        specialRequests,
+        contactName,
+        contactPhone,
+        contactEmail,
+        basePrice: pricing.basePrice,
+        cateringCost: pricing.cateringCost,
+        platformFee: pricing.platformFee,
+        gstOnPlatform: pricing.gstOnPlatform,
+        total: pricing.total,
+        advancePaid: pricing.advance,
+        balanceDue: pricing.balance,
+        paymentMethod,
+      })
+      .then(({ booking }) => {
+        setSavedBookingId(booking.id);
+        setBookingDone(true);
+      })
+      .catch((err) => {
+        setBookingError(
+          err instanceof ApiError
+            ? err.message
+            : 'Payment could not be confirmed right now. Please try again in a moment.'
+        );
+      })
+      .finally(() => {
+        setPaying(false);
+      });
   };
 
   // Format card number with spaces
@@ -140,11 +206,34 @@ export default function Booking() {
     return digits;
   };
 
-  return (
-    <div className="min-h-screen bg-cream pb-8">
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-cream flex items-center justify-center">
+        <div className="text-center">
+          <div className="h-10 w-10 mx-auto mb-3 rounded-full border-2 border-primary-200 border-t-primary-500 animate-spin" />
+          <p className="text-sm text-gray-400">Loading venue...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (loadError || !venue || !pricing) {
+    return (
+      <div className="min-h-screen bg-cream flex items-center justify-center px-4">
+        <div className="text-center max-w-sm">
+          <p className="text-sm text-coral-500 mb-4">{loadError || 'This venue could not be found.'}</p>
+          <Link to="/search">
+            <Button variant="cta">Back to Search</Button>
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  return (<div className="min-h-screen bg-cream pb-8">
       <div className="container-app py-6 max-w-3xl">
 
-        {/* \u2014\u2014 PROGRESS BAR \u2014\u2014 */}
+        {/* —— PROGRESS BAR —— */}
         {!bookingDone && (
           <div className="mb-8">
             <div className="flex items-center justify-between relative">
@@ -182,7 +271,7 @@ export default function Booking() {
           </div>
         )}
 
-        {/* \u2014\u2014 STEP 1: BOOKING DETAILS \u2014\u2014 */}
+        {/* —— STEP 1: BOOKING DETAILS —— */}
         {step === 1 && !bookingDone && (
           <div className="space-y-5">
             {/* Venue summary card */}
@@ -211,7 +300,7 @@ export default function Booking() {
                   )}
                 </div>
                 <div className="mt-1 text-sm font-bold text-gray-900">
-                  \u20b9{venue.price.toLocaleString('en-IN')}
+                  ₹{venue.price.toLocaleString('en-IN')}
                   <span className="text-sm font-normal text-gray-500"> / day</span>
                 </div>
               </div>
@@ -272,7 +361,7 @@ export default function Booking() {
                         onClick={() => setGuests((g) => Math.max(10, g - 10))}
                         className="px-3 py-2.5 text-gray-500 hover:bg-gray-50 transition-colors font-bold text-lg leading-none border-r border-gray-200"
                       >
-                        \u2212
+                        −
                       </button>
                       <input
                         type="number"
@@ -357,8 +446,7 @@ export default function Booking() {
                     className={`w-full rounded-input border px-4 py-2.5 text-sm focus:outline-none focus:ring-1 transition-colors ${errors.contactName ? 'border-red-400 focus:border-red-400 focus:ring-red-400 bg-red-50' : 'border-gray-200 focus:border-primary-400 focus:ring-primary-400'}`}
                   />
                   {errors.contactName && <p className="text-xs text-red-500 mt-1">{errors.contactName}</p>}
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                </div><div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1.5">Phone (10 digits) *</label>
                     <input
@@ -391,7 +479,7 @@ export default function Booking() {
           </div>
         )}
 
-        {/* \u2014\u2014 STEP 2: REVIEW & CONFIRM \u2014\u2014 */}
+        {/* STEP 2: REVIEW & CONFIRM */}
         {step === 2 && !bookingDone && (
           <div className="space-y-5">
             {/* Booking summary */}
@@ -412,7 +500,7 @@ export default function Booking() {
                 <div>
                   <p className="text-sm font-semibold text-gray-900">{venue.name}</p>
                   <p className="text-xs text-gray-500 mt-0.5">{venue.area}, {venue.city}</p>
-                  <p className="text-xs text-primary-600 font-medium mt-1">{date} \u00b7 {slotLabels[slot]}</p>
+                  <p className="text-xs text-primary-600 font-medium mt-1">{date} - {slotLabels[slot]}</p>
                 </div>
               </div>
 
@@ -445,33 +533,33 @@ export default function Booking() {
               <div className="space-y-2.5 text-sm">
                 <div className="flex justify-between py-1">
                   <span className="text-gray-500">Base price ({slotLabels[slot]})</span>
-                  <span className="text-gray-900">\u20b9{pricing.basePrice.toLocaleString('en-IN')}</span>
+                  <span className="text-gray-900">₹{pricing.basePrice.toLocaleString('en-IN')}</span>
                 </div>
                 {pricing.cateringCost > 0 && (
                   <div className="flex justify-between py-1">
-                    <span className="text-gray-500">Catering (\u20b9800 \u00d7 {guests} guests)</span>
-                    <span className="text-gray-900">\u20b9{pricing.cateringCost.toLocaleString('en-IN')}</span>
+                    <span className="text-gray-500">Catering (₹800 x {guests} guests)</span>
+                    <span className="text-gray-900">₹{pricing.cateringCost.toLocaleString('en-IN')}</span>
                   </div>
                 )}
                 <div className="flex justify-between py-1">
                   <span className="text-gray-500">Platform fee (5%)</span>
-                  <span className="text-gray-900">\u20b9{pricing.platformFee.toLocaleString('en-IN')}</span>
+                  <span className="text-gray-900">₹{pricing.platformFee.toLocaleString('en-IN')}</span>
                 </div>
                 <div className="flex justify-between py-1">
                   <span className="text-gray-500">GST on platform fee (18%)</span>
-                  <span className="text-gray-900">\u20b9{pricing.gstOnPlatform.toLocaleString('en-IN')}</span>
+                  <span className="text-gray-900">₹{pricing.gstOnPlatform.toLocaleString('en-IN')}</span>
                 </div>
                 <div className="border-t border-gray-200 pt-3 flex justify-between font-semibold text-base">
                   <span>Total Amount</span>
-                  <span className="text-gray-900">\u20b9{pricing.total.toLocaleString('en-IN')}</span>
+                  <span className="text-gray-900">₹{pricing.total.toLocaleString('en-IN')}</span>
                 </div>
                 <div className="flex justify-between font-semibold text-base text-coral-500">
                   <span>Advance payable now (25%)</span>
-                  <span>\u20b9{pricing.advance.toLocaleString('en-IN')}</span>
+                  <span>₹{pricing.advance.toLocaleString('en-IN')}</span>
                 </div>
                 <div className="flex justify-between text-gray-500">
                   <span>Balance due on event day</span>
-                  <span>\u20b9{pricing.balance.toLocaleString('en-IN')}</span>
+                  <span>₹{pricing.balance.toLocaleString('en-IN')}</span>
                 </div>
               </div>
             </div>
@@ -489,7 +577,7 @@ export default function Booking() {
                 <div className="px-4 pb-4 text-sm text-gray-600 space-y-2 border-t border-gray-100">
                   {cancellationPolicy.map((p, i) => (
                     <p key={i} className="flex items-start gap-2 pt-2">
-                      <span className="text-primary-400 mt-0.5 shrink-0">\u2022</span>
+                      <span className="text-primary-400 mt-0.5 shrink-0">*</span>
                       {p}
                     </p>
                   ))}
@@ -525,14 +613,14 @@ export default function Booking() {
           </div>
         )}
 
-        {/* \u2014\u2014 STEP 3: PAYMENT \u2014\u2014 */}
+        {/* STEP 3: PAYMENT */}
         {step === 3 && !bookingDone && (
           <div className="space-y-5">
             {/* Amount banner */}
             <div className="rounded-card bg-primary-500 p-5 text-center">
-              <p className="text-primary-100 text-sm font-medium mb-1">25% Advance \u2014 Pay Now</p>
-              <p className="text-4xl font-bold text-white">\u20b9{pricing.advance.toLocaleString('en-IN')}</p>
-              <p className="text-primary-200 text-xs mt-1.5">Total booking value: \u20b9{pricing.total.toLocaleString('en-IN')}</p>
+              <p className="text-primary-100 text-sm font-medium mb-1">25% Advance - Pay Now</p>
+              <p className="text-4xl font-bold text-white">₹{pricing.advance.toLocaleString('en-IN')}</p>
+              <p className="text-primary-200 text-xs mt-1.5">Total booking value: ₹{pricing.total.toLocaleString('en-IN')}</p>
             </div>
 
             {/* Payment methods */}
@@ -563,9 +651,7 @@ export default function Booking() {
                       ))}
                     </div>
                   )}
-                </div>
-
-                {/* Net Banking */}
+                </div>{/* Net Banking */}
                 <div
                   onClick={() => setPaymentMethod('netbanking')}
                   className={`rounded-input border p-4 cursor-pointer transition-colors ${paymentMethod === 'netbanking' ? 'border-primary-400 bg-primary-50' : 'border-gray-200 hover:border-gray-300'}`}
@@ -631,7 +717,7 @@ export default function Booking() {
                             type="password"
                             value={cardCvv}
                             onChange={(e) => setCardCvv(e.target.value.replace(/\D/g, '').slice(0, 3))}
-                            placeholder="\u2022\u2022\u2022"
+                            placeholder="***"
                             maxLength={3}
                             className="w-full rounded-input border border-gray-200 px-3 py-2 text-sm font-mono focus:border-primary-400 focus:outline-none focus:ring-1 focus:ring-primary-400"
                           />
@@ -681,7 +767,7 @@ export default function Booking() {
                               />
                               <span className="text-sm text-gray-700">{opt.label}</span>
                             </div>
-                            <span className="text-sm font-bold text-gray-900">\u20b9{emiAmount.toLocaleString('en-IN')}/mo</span>
+                            <span className="text-sm font-bold text-gray-900">₹{emiAmount.toLocaleString('en-IN')}/mo</span>
                           </label>
                         );
                       })}
@@ -692,6 +778,9 @@ export default function Booking() {
             </div>
 
             {/* Pay button */}
+            {bookingError && (
+              <p className="text-sm text-coral-500 text-center">{bookingError}</p>
+            )}
             <div className="flex gap-3">
               <Button variant="outline" className="flex-1 py-3" onClick={() => setStep(2)} disabled={paying}>Back</Button>
               <Button
@@ -703,7 +792,7 @@ export default function Booking() {
                 {paying ? (
                   <><Loader2 className="h-4 w-4 animate-spin" />Processing...</>
                 ) : (
-                  <><Lock className="h-4 w-4" />Pay \u20b9{pricing.advance.toLocaleString('en-IN')} Securely</>
+                  <><Lock className="h-4 w-4" />Pay ₹{pricing.advance.toLocaleString('en-IN')} Securely</>
                 )}
               </Button>
             </div>
@@ -711,12 +800,12 @@ export default function Booking() {
             {/* Security note */}
             <div className="flex items-center justify-center gap-2 text-xs text-gray-400">
               <Lock className="h-3.5 w-3.5" />
-              <span>100% Secure Payment \u00b7 SSL Encrypted \u00b7 PCI DSS Compliant</span>
+              <span>100% Secure Payment - SSL Encrypted - PCI DSS Compliant</span>
             </div>
           </div>
         )}
 
-        {/* \u2014\u2014 SUCCESS SCREEN \u2014\u2014 */}
+        {/* SUCCESS SCREEN */}
         {bookingDone && (
           <div className="rounded-card bg-white p-8 shadow-sm text-center">
             {/* Animated checkmark */}
@@ -730,13 +819,13 @@ export default function Booking() {
             {/* Booking details */}
             <div className="max-w-sm mx-auto text-left rounded-card border border-gray-100 bg-gray-50 p-4 mb-6 space-y-2">
               {[
-                ['Booking ID', bookingId],
+                ['Booking ID', savedBookingId],
                 ['Venue', venue.name],
                 ['Date', date],
                 ['Time Slot', slotLabels[slot]],
                 ['Guests', `${guests}`],
-                ['Amount Paid', `\u20b9${pricing.advance.toLocaleString('en-IN')}`],
-                ['Balance Due', `\u20b9${pricing.balance.toLocaleString('en-IN')} (on event day)`],
+                ['Amount Paid', `₹${pricing.advance.toLocaleString('en-IN')}`],
+                ['Balance Due', `₹${pricing.balance.toLocaleString('en-IN')} (on event day)`],
               ].map(([label, value]) => (
                 <div key={label} className="flex justify-between text-sm py-1 border-b border-gray-100 last:border-0">
                   <span className="text-gray-500">{label}</span>

@@ -98,10 +98,79 @@ export function getVenue(id: string): Promise<{ venue: Venue; reviews: Review[] 
   return apiFetch<{ venue: Venue; reviews: Review[] }>(`/api/venues/${id}`);
 }
 
+export interface CreateBookingPayload {
+  venueId: string;
+  eventDate: string;
+  slot: string;
+  guests: number;
+  eventType: string;
+  foodPref: string;
+  specialRequests: string;
+  contactName: string;
+  contactPhone: string;
+  contactEmail: string;
+  basePrice: number;
+  cateringCost: number;
+  platformFee: number;
+  gstOnPlatform: number;
+  total: number;
+  advancePaid: number;
+  balanceDue: number;
+  paymentMethod: string;
+}
+
+export interface Booking {
+  id: string;
+  venueId: string;
+  eventDate: string;
+  slot: string;
+  guests: number;
+  eventType: string;
+  foodPref: string;
+  specialRequests: string;
+  contactName: string;
+  contactPhone: string;
+  contactEmail: string;
+  basePrice: number;
+  cateringCost: number;
+  platformFee: number;
+  gstOnPlatform: number;
+  total: number;
+  advancePaid: number;
+  balanceDue: number;
+  paymentMethod: string;
+  status: string;
+  createdAt: string;
+  venueName?: string;
+  venueImage?: string;
+  venueArea?: string;
+}
+
+/**
+ * Creates a real booking record. Matches POST /api/bookings in routes/bookings.js.
+ * Note: this only PERSISTS the booking - actual payment is still simulated on
+ * the frontend since there's no real payment gateway integrated yet.
+ */
+export function createBooking(payload: CreateBookingPayload): Promise<{ booking: Booking }> {
+  return apiFetch<{ booking: Booking }>('/api/bookings', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+/**
+ * Lists the logged-in user's own bookings. Matches GET /api/bookings/mine.
+ */
+export function listMyBookings(): Promise<{ bookings: Booking[] }> {
+  return apiFetch<{ bookings: Booking[] }>('/api/bookings/mine');
+}
+
 export const api = {
   loginWithGoogle,
   getMe,
   logout,
   listVenues,
   getVenue,
+  createBooking,
+  listMyBookings,
 };
